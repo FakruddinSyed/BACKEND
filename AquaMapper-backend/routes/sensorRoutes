@@ -1,0 +1,21 @@
+const express = require('express');
+const router = express.Router();
+const sensorController = require('../controllers/sensorController'); 
+
+// 1. Core Data APIs
+// GET /api/v1/sensors/latest
+router.get('/latest', sensorController.getLatestReadings);
+
+// GET /api/v1/sensors/station/:id
+router.get('/station/:id', sensorController.getStationHistory);
+
+// 2. RWH Calculation API
+// GET /api/v1/sensors/rwh/potential?area_sqm=XXX
+router.get('/rwh/potential', sensorController.getRWHPotential);
+
+// 3. ML Forecasting API
+// GET /api/v1/sensors/forecast/rainfall
+router.get('/forecast/rainfall', sensorController.getRainfallForecast);
+
+
+module.exports = router;

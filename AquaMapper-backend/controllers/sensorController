@@ -1,0 +1,147 @@
+const SensorData = require('../models/SensorData');
+ // Used for ML integration
+
+// --- Core Data Retrieval Functions ---
+
+/**
+ * Finds the latest sensor reading for every unique station_id.
+ * Used primarily for the map visualization.
+ */
+exports.getLatestReadings = async (req, res) => {
+    try {
+        // MongoDB Aggregation Pipeline to find the latest reading per station_id
+        const latestReadings = await SensorData.aggregate([
+            // 1. Sort all documents newest first
+            { $sort: { timestamp: -1 } },
+            // 2. Group by station_id, keeping the first (newest) document in the group
+            {
+                $group: {
+                    _id: "$station_id",
+                    latestData: { $first: "$$ROOT" }
+                }
+            },
+            // 3. Reshape the output to match the original document structure
+            { $replaceRoot: { newRoot: "$latestData" } }
+        ]);
+
+        res.status(200).json({
+            success: true,
+            count: latestReadings.length,
+            data: latestReadings
+        });
+    } catch (error) {
+        console.error('Error fetching latest readings:', error.message);
+        res.status(500).json({ success: false, error: 'Server Error fetching latest data.' });
+    }
+};
+
+
+/**
+ * Retrieves time-series history for a specific sensor station.
+ * Used for detailed charts on the dashboard.
+ */
+exports.getStationHistory = async (req, res) => {
+    try {
+        const stationId = req.params.id;
+        // Find all documents for the specified station ID, sorted by time
+        const history = await SensorData.find({ station_id: stationId })
+            .sort({ timestamp: 1 })
+            .limit(1000) // Limit to 1000 points for chart performance
+            .select('timestamp water_level_m rainfall_mm ph_level location'); // Select only relevant fields
+
+        if (!history || history.length === 0) {
+            return res.status(404).json({ success: false, error: 'Station ID not found or no data available.' });
+        }
+
+        res.status(200).json({
+            success: true,
+            station_id: stationId,
+            count: history.length,
+            data: history
+        });
+    } catch (error) {
+        console.error('Error fetching station history:', error.message);
+        res.status(500).json({ success: false, error: 'Server Error fetching history.' });
+    }
+};
+
+// --- Rainwater Harvesting (RWH) Calculation ---
+
+/**
+ * Calculates the annual rainwater harvesting potential for a given area.
+ */
+exports.getRWHPotential = (req, res) => {
+    const areaSqM = parseFloat(req.query.area_sqm);
+
+    if (isNaN(areaSqM) || areaSqM <= 0) {
+        return res.status(400).json({
+            success: false,
+            error: "Please provide a valid 'area_sqm' query parameter (e.g., ?area_sqm=100)."
+        });
+    }
+
+    // Assumptions for Hyderabad (Simplified for Project Scope)
+    const AVG_ANNUAL_RAINFALL_MM = 800; // 800 mm is ~0.8 meters
+    const RUNOFF_COEFFICIENT = 0.75; // Typical for a clean concrete or tiled rooftop
+
+    // Convert rainfall from mm to meters: 800 mm / 1000 = 0.8 m
+    const avgAnnualRainfallM = AVG_ANNUAL_RAINFALL_MM / 1000;
+
+    // Calculation: (Area in m²) * (Rainfall in m) * (Runoff Coefficient) * (Conversion to Liters: 1 m³ = 1000 L)
+    const annualPotentialM3 = areaSqM * avgAnnualRainfallM * RUNOFF_COEFFICIENT;
+    const annualPotentialLiters = Math.round(annualPotentialM3 * 1000);
+
+
+    res.status(200).json({
+        success: true,
+        area_sqm: areaSqM,
+        annual_rainfall_mm: AVG_ANNUAL_RAINFALL_MM,
+        runoff_coefficient: RUNOFF_COEFFICIENT,
+        results: {
+            annual_harvesting_potential_liters: annualPotentialLiters,
+            notes: "Potential calculated using 800mm average annual rainfall for Hyderabad and a runoff coefficient of 0.75 (for a typical concrete rooftop)."
+        }
+    });
+};
+
+
+// --- ML Integration API (Needs External Service) ---
+
+/**
+ * Fetches the predicted rainfall from the external Python ML service.
+ */
+exports.getRainfallForecast = async (req, res) => {
+    // NOTE: This assumes the Python ML service is running on http://127.0.0.1:5000/predict/rainfall
+    const ML_SERVICE_URL = 'http://127.0.0.1:5000/predict/rainfall'; 
+
+    try {
+        // 1. Make a request to the external Python Flask/FastAPI service
+        const response = await fetch(ML_SERVICE_URL);
+
+        if (!response.ok) {
+            // If the ML service is down or returns an error
+            const errorText = await response.text();
+            throw new Error(`ML Service returned status ${response.status}: ${errorText}`);
+        }
+
+        // 2. Get the JSON prediction from the Python service
+        const predictionData = await response.json();
+
+        // 3. Return the prediction to the AquaMapper frontend
+        res.status(200).json({
+            success: true,
+            source: "External ML Service (Python Flask)",
+            forecast: predictionData
+        });
+
+    } catch (error) {
+        console.error('Error contacting ML service:', error.message);
+        // Return a 503 Service Unavailable error if the ML service cannot be reached
+        res.status(503).json({
+            success: false,
+            error: 'ML Forecasting service is unavailable.',
+            details: error.message,
+            next_step: "Ensure your 'ml-service/app.py' is running on port 5000 in a separate terminal."
+        });
+    }
+};
