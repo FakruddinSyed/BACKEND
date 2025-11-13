@@ -4,8 +4,10 @@ from flask import Flask, jsonify
 import numpy as np
 import os
 from datetime import datetime, timedelta
+from flask_cros import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_PATH = os.path.join(BASE_DIR, 'icrisat_weather.csv')
