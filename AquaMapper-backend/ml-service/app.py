@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+print("Current working directory:", os.getcwd())
+print("Files here:", os.listdir('.'))
+
 # --- Model Training Function ---
 def train_rainfall_predictor():
     FILE_PATH = 'icrisat_weather.csv'
